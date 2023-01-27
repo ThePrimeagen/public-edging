@@ -4,6 +4,8 @@
 **/*.rs.bk
 wasm-pack.log
 .env
+.dev.vars
+.turso_history
 
 build/
 /target

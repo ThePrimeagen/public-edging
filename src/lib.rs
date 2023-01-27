@@ -1,8 +1,11 @@
+use leptos::{render_to_string, view};
 use serde_json::json;
-use worker::*;
 use view::app::{App, AppProps};
-use leptos::{render_to_string, create_runtime, view, IntoView};
+use worker::*;
+// use turso::{ResultSet, CellValue};
+use libsql_client::{ResultSet, CellValue};
 
+mod turso;
 mod utils;
 
 trait Foo {
@@ -45,10 +48,63 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     // functionality and a `RouteContext` which you can use to  and get route parameters and
     // Environment bindings like KV Stores, Durable Objects, Secrets, and Variables.
     router
-        .get("/", |_, _| {
-            let html = render_to_string(|cx| {
+        .get_async("/", |_, ctx| async move {
+            /*
+            let db = turso::Turso::connect(
+                ctx.env.var("LIBSQL_CLIENT_URL").unwrap().to_string(),
+                ctx.env.var("LIBSQL_CLIENT_USER").unwrap().to_string().as_str(),
+                ctx.env.var("LIBSQL_CLIENT_PASS").unwrap().to_string().as_str(),
+            );
+
+            let db = libsql_client::Session::connect(
+                    ctx.env.var("LIBSQL_CLIENT_URL").unwrap().to_string(),
+                    ctx.env.var("LIBSQL_CLIENT_USER").unwrap().to_string().as_str(),
+                    ctx.env.var("LIBSQL_CLIENT_PASS").unwrap().to_string().as_str(),
+            );
+            */
+            let db = libsql_client::Session::connect_from_ctx(&ctx)?;
+
+            // execute the damn query
+            println!("executing query: create table");
+            db.execute("CREATE TABLE IF NOT EXISTS counter (key TEXT, value INTEGER)")
+                .await?;
+
+            println!("executing query: select");
+            let response = db
+                .execute("SELECT * FROM counter WHERE key = 'turso'")
+                .await?;
+
+            let counter_value = match response {
+                ResultSet::Error((msg, _)) => {
+                    return Response::from_html(format!("Error: {}", msg))
+                }
+                ResultSet::Success((rows, _)) => {
+                    if rows.rows.is_empty() {
+                        _ = db
+                            .execute("INSERT INTO counter (key, value) VALUES ('turso', 0)")
+                            .await?;
+                        return Response::from_html("Zero results for counter queries");
+                    }
+                    match rows.rows[0].cells.get("value") {
+                        Some(Some(v)) => match v {
+                            CellValue::Number(v) => *v,
+                            _ => return Response::from_html("Unexpected counter value"),
+                        },
+                        _ => return Response::from_html("No value for 'value' column"),
+                    }
+                }
+            };
+
+            db.transaction([format!(
+                "UPDATE counter SET value = {} WHERE key = 'turso'",
+                counter_value + 1
+            )])
+            .await
+            .ok();
+
+            let html = render_to_string(move |cx| {
                 return view! {cx,
-                    <App />
+                    <App counter=counter_value />
                 };
             });
 
@@ -77,3 +133,4 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
         .run(req, env)
         .await
 }
+

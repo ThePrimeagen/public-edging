@@ -1,9 +1,17 @@
-name = "" # todo
+name = "hello-todo" # todo
 main = "build/worker/shim.mjs"
 compatibility_date = "2022-01-20"
 
 [vars]
 WORKERS_RS_VERSION = "0.0.11"
+
+# Override values for `--env production` usage
+# [env.production]
+# name = "my-worker-production"
+# [env.production.vars]
+# API_TOKEN = "example_production_token"
+# STRIPE_TOKEN = "pk_xyz1234"
+
 
 [build]
 command = "cargo install -q worker-build --version 0.0.7 && worker-build --release"
