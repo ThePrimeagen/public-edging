@@ -50,49 +50,37 @@ fn get_template() -> Result<Templates> {
 struct Page {
 	file_name: String,
 	file_name_wo_ext: Option<String>,
-	project_path: String,
-	project_parent_path: Option<String>,
+	project_path: PathBuf,
+	project_parent_path: PathBuf,
 	page_path: String,
 	dir: bool,
+	is_mod: bool,
 }
 
-fn describe(dir: &Path, file: &Path) -> Result<Option<Page>> {
+fn describe(dir: &Path, file: &Path) -> Result<Page> {
+	let metadata = file.metadata()?;
 	let file = file.strip_prefix(&dir)?;
 
-	let mut project_path = PathBuf::from("src");
-	project_path.push("pages");
+	let mut project_base_path = PathBuf::from("src");
+	project_base_path.push("pages");
 
-	let mut file_parent = Some(PathBuf::from(""));
-	if let Some(parent) = file.parent() {
-		file_parent = Some(parent.to_path_buf());
-	}
-	project_path.push(file_parent.unwrap());
+	let project_path = project_base_path.join(file.clone());
+	let project_parent_path = project_path.parent().unwrap().to_path_buf();
 
-	let metadata = project_path.metadata()?;
 	let mut file_without_ext = None;
 	if metadata.is_file() {
 		file_without_ext = Some(file.with_extension("").to_string_lossy().to_string());
 	}
 
-	if let Some(f) = file_without_ext.clone() {
-		project_path.push(f);
-	} else {
-		project_path.push(file.clone());
-	}
-
-	let mut project_parent_path = None;
-	if let Some(parent) = project_path.parent() {
-		project_parent_path = Some(parent.to_string_lossy().to_string());
-	}
-
-	return Ok(Some(Page {
+	return Ok(Page {
 		file_name: file.to_string_lossy().to_string(),
 		file_name_wo_ext: file_without_ext,
-		project_path: project_path.to_string_lossy().to_string(),
+		project_path,
 		project_parent_path,
 		page_path: file.to_string_lossy().to_string(),
 		dir: metadata.is_dir(),
-	}));
+		is_mod: file.ends_with("mod.rs"),
+	});
 }
 
 fn main() -> Result<()> {
@@ -103,25 +91,55 @@ fn main() -> Result<()> {
 
 	let template = get_template()?;
 
-	let mut mod_files: HashMap<String, Vec<String>> = HashMap::new();
+	let mut mod_files: HashMap<PathBuf, Vec<String>> = HashMap::new();
 	let mut routes: HashMap<String, String> = HashMap::new();
 
-	let all_paths = walk(dir.clone())?;
-	let dirs = all_paths
+	let all_paths = walk(dir.clone())?
 		.iter()
-		.filter_map(|x| x.metadata().ok().map(|m| (x, m)))
-		.filter(|(_, m)| m.is_dir())
-		.map(|(x, _)| x)
-		.collect::<Vec<_>>();
+		.map(|x| describe(&dir, x).expect("unable to describe path"))
+		.filter(|x| !x.is_mod) // drop all mod files, they will be modified
+		.collect::<Vec<Page>>();
 
-	for path in dirs {
-		println!("cargo:warning=dir {:?}", path);
-		let page = describe(&dir, path)?;
-		if let None = page {
-			continue;
+	// Pass 1, build the mod tree
+	for page in all_paths.iter().filter(|x| x.dir) {
+		mod_files.insert(page.project_path.clone(), vec![]);
+
+		let top = PathBuf::from("src/pages");
+        let mut parent = page.project_path.parent();
+		let mut curr = Some(page.project_path.as_path());
+		while let Some(c) = curr {
+            if let Some(p) = parent {
+                if p != PathBuf::from("src") {
+                    let mut mod_name = c
+                        .to_string_lossy()
+                        .to_string()
+                        .replace(std::path::MAIN_SEPARATOR, "::");
+
+                    mod_name = mod_name.replace("src::pages::", "");
+                    if mod_name.ends_with("::") {
+                        mod_name = mod_name[0..mod_name.len() - 2].to_string();
+                    }
+
+                    let vec = mod_files
+                        .entry(p.to_path_buf().clone())
+                        .or_insert(vec![]);
+                    if !vec.contains(&mod_name) {
+                        vec.push(mod_name);
+                    }
+                }
+            }
+
+            mod_files.entry(c.to_path_buf().clone()).or_insert(vec![]);
+
+            // i know... this sucks
+            if c == top {
+                break;
+            }
+
+			curr = c.parent();
+			parent = parent.and_then(|x| x.parent());
 		}
 
-		println!("cargo:warning=page {:?} ", page);
 		/*
 		let mod_parent = project_path.parent().unwrap().to_string_lossy().to_string();
 		println!("cargo:warning=    adding mod: mod_parent={:?} ", mod_parent);
@@ -143,7 +161,24 @@ fn main() -> Result<()> {
 
 	}
 
-	println!("cargo:warning=mod_files {:?} ", mod_files);
+    println!("cargo:warning=mod_files: {:?} ", mod_files);
+
+    mod_files
+        .iter()
+        .map(|(k, v)| {
+            let v = v.iter().map(|x| format!("pub mod {};", x)).collect::<Vec<String>>();
+            return (k, v)
+        })
+        .for_each(|(path, m)| {
+            let mods = m.join("\n");
+            let mods = template.page.replace("__MODS__", &mods);
+            println!("cargo:warning=mod file contents: {:?} ", mods);
+
+            if let Err(e) = std::fs::write(path.join("mod.rs"), mods) {
+                panic!("unable to write mod file: {:?}", e);
+            }
+        });
+
 	todo!("finish");
 	/*
 	/*
@@ -191,14 +226,6 @@ fn main() -> Result<()> {
     std::fs::write(ROUTE_PATH, routes)?;
 
 	/*
-    let mods = mods
-        .iter()
-        .map(|x| format!("pub mod {};", x))
-        .collect::<Vec<String>>();
-    let mods = mods.join("\n");
-    let mods = template.page.replace("__MODS__", &mods);
-
-    std::fs::write(MOD_PATH, mods)?;
 	*/
 
     return Ok(());
