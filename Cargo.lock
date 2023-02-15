@@ -258,6 +258,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f61fba1741ea2b3d6a1e3178721804bb716a68a6aeba1149b5d52e3d464ea66"
 
 [[package]]
+name = "pages"
+version = "0.1.0"
+
+[[package]]
 name = "parse-zoneinfo"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -392,6 +396,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
 
 [[package]]
+name = "router"
+version = "0.1.0"
+dependencies = [
+ "worker",
+]
+
+[[package]]
 name = "ryu"
 version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -506,6 +517,7 @@ dependencies = [
  "base64",
  "cfg-if 0.1.10",
  "console_error_panic_hook",
+ "syn",
  "walkdir",
  "worker",
 ]
