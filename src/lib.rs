@@ -4,7 +4,6 @@ mod utils;
 
 /** DO NOT EDIT **/
 mod router;
-mod pages;
 /** DO NOT EDIT **/
 
 fn log_request(req: &Request) {
