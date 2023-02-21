@@ -1,10 +1,8 @@
+
 use worker::*;
+//use router::add_routes;
 
 mod utils;
-
-/** DO NOT EDIT **/
-mod router;
-/** DO NOT EDIT **/
 
 fn log_request(req: &Request) {
     console_log!(
@@ -31,9 +29,36 @@ pub async fn main(req: Request, env: Env, _ctx: worker::Context) -> Result<Respo
     // Add as many routes as your Worker needs! Each route will get a `Request` for handling HTTP
     // functionality and a `RouteContext` which you can use to  and get route parameters and
     // Environment bindings like KV Stores, Durable Objects, Secrets, and Variables.
+    //
 
-    return router::add_routes(Router::new())
+
+
+    // Add as many routes as your Worker needs! Each route will get a `Request` for handling HTTP
+    // functionality and a `RouteContext` which you can use to  and get route parameters and
+    // Environment bindings like KV Stores, Durable Objects, Secrets, and Variables.
+    return Router::new()
+        //.get_async("/", |_, ctx| async move { })
+        .get_async("/", move |req, ctx| {
+            return pages::get(ctx);
+        })
+        .get_async("/sub_dir/other/", |req, ctx| {
+            return pages::sub_dir::other::get(ctx);
+        })
         .run(req, env)
         .await;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

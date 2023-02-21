@@ -1,6 +1,64 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use syn::Visibility;
-use std::path::{Path, PathBuf};
+use std::{path::{Path, PathBuf}, convert::{TryFrom, TryInto}, fmt::Display};
+
+#[derive(Debug)]
+enum Method {
+    Get,
+    Post
+}
+
+impl Display for Method {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Method::Get => write!(f, "get"),
+            Method::Post => write!(f, "post"),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct PageDescription {
+    path: PathBuf,
+    mods: Vec<String>,
+    routes: Vec<Method>,
+}
+
+impl TryFrom<&Path> for PageDescription {
+
+    type Error = anyhow::Error;
+
+    fn try_from(value: &Path) -> Result<Self, Self::Error> {
+        let file = std::fs::read_to_string(value)?;
+        let file = syn::parse_file(file.as_str())?;
+
+        let mut mods = vec![];
+        let mut routes = vec![];
+
+        for item in file.items {
+            if let syn::Item::Mod(item) = &item {
+                if let Visibility::Public(_) = item.vis {
+                    mods.push(item.ident.to_string());
+                }
+            }
+
+            if let syn::Item::Fn(item) = &item {
+                if let Visibility::Public(_) = item.vis {
+                    if item.sig.ident.to_string() == "get" {
+                        routes.push(Method::Get);
+                    }
+                }
+            }
+        }
+
+        return Ok(PageDescription {
+            path: value.to_path_buf(),
+            mods,
+            routes,
+        });
+    }
+}
+
 
 /**
  * ------------------ WARNING ---------------------
@@ -14,91 +72,80 @@ use std::path::{Path, PathBuf};
 const ROUTE_TEMPLATE_PATH: &str = "./route.rs.template";
 const ROUTE_PATH: &str = "router/src/lib.rs";
 
-/**
-fn walk(mut dir: PathBuf) -> Result<Vec<PathBuf>> {
-    return Ok(WalkDir::new(&dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .map(|e| e.path().to_path_buf())
-        .collect());
-}
-*/
-
 #[derive(Debug)]
 struct Pages {
     librs: PathBuf,
 }
 
-fn list_routes(dir: &Path) -> Result<Vec<String>> {
-    todo!("Implement this you piece");
-}
-
 #[derive(Debug)]
 struct Page {
-    route: PathBuf,
+    path: PathBuf,
     mods: Vec<PathBuf>,
-    routes: Vec<&'static str>,
+    routes: Vec<Method>,
 }
 
-// pub mod foo;
-// is foo a file?
-// is foo a directory?
-//
-// ./foo.rs
-fn describe(f: &Path) -> Result<Page> {
-    let route = f.parent().unwrap().to_path_buf(); // DANGEROUS
+fn get_potential_filenames(base_path: &PathBuf, mod_ident: &String) -> (PathBuf, PathBuf) {
+    // TODO: Sorry rustaceans, this is a hack that is
+    let possible_file_name = format!("{}.rs", mod_ident);
 
-    let file = std::fs::read_to_string(f)?;
-    let file = syn::parse_file(file.as_str())?;
+    let mut file_path = base_path.clone();
+    file_path.push(possible_file_name);
 
-    let mut files = vec![];
-    let mut routes = vec![];
-    for item in file.items {
-        if let syn::Item::Mod(item) = &item {
-            if let Visibility::Public(_) = item.vis {
-                files.push(item.ident.to_string());
+    let mut mod_path = base_path.clone();
+    mod_path.push(mod_ident);
+    mod_path.push("mod.rs");
+
+    return (file_path, mod_path);
+}
+
+impl TryFrom<&Path> for Page {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &Path) -> Result<Self, Self::Error> {
+
+        let desc: PageDescription = value.try_into()?;
+        let base_path = value.parent().unwrap().to_path_buf();
+        let mut mod_paths = vec![];
+
+        for file in desc.mods {
+            let (file_path, mod_path) = get_potential_filenames(&base_path, &file);
+
+            // We don't allow for this situation right now.
+            // This situation is confusing
+            if file_path.is_file() && mod_path.is_file() {
+                return Err(anyhow!(format!(
+                    "You cannot have a file and directory/mod.rs with the same name: {:?} and {:?} cannot exist",
+                    file_path, mod_path
+                )));
+            }
+
+            println!("base: {:?}, file: {:?}", base_path, file);
+            if !file_path.is_file() && !mod_path.is_file() {
+                return Err(anyhow!(format!(
+                    "Somehow path {:?} was detected but neither {:?} nor {:?} exists.",
+                    file, file_path, mod_path
+                )));
+            }
+
+            if file_path.is_file() {
+                mod_paths.push(file_path);
+            } else {
+                mod_paths.push(mod_path);
             }
         }
 
-        if let syn::Item::Fn(item) = &item {
-            if let Visibility::Public(_) = item.vis {
-                if item.sig.ident.to_string() == "get" {
-                    routes.push("get");
-                }
-            }
-        }
+        let page = Page {
+            path: value.to_path_buf(),
+            mods: mod_paths,
+            routes: desc.routes,
+        };
+
+        println!("page: {:?}", page);
+
+        return Ok(page);
     }
-
-    let mut mods = vec![];
-    for file in files {
-        // TODO: Sorry rustaceans, this is a hack that is
-        let mut path = f.to_path_buf().parent().unwrap().to_path_buf();
-        path.push(file);
-
-        if path.is_dir() {
-            mods.push(path);
-            continue;
-        }
-
-        // grows
-        let path = path.to_str().unwrap().to_string();
-        let path = format!("{}.rs", path);
-        let path = PathBuf::from(path);
-
-        if path.is_file() {
-            mods.push(path);
-        } else {
-            // WHAT THE HELL IS EVEN THAT?
-            unreachable!("This shouldn't happen? {:?}", path);
-        }
-    }
-
-    return Ok(Page {
-        route,
-        mods,
-        routes,
-    });
 }
+
 
 fn main() -> Result<()> {
     let dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -110,27 +157,23 @@ fn main() -> Result<()> {
     librs.push("lib.rs");
 
     let mut files = vec![librs];
-    let mut all_describes = vec![];
+    let mut pages = vec![];
 
-    while let Some(mut file) = files.pop() {
-        if file.is_dir() {
-            file.push("mod.rs");
-        }
+    while let Some(file) = files.pop() {
+        let page: Page = file.as_path().try_into()?;
 
-        let mod_files = describe(&file)?;
+        files.extend(page.mods.clone().into_iter());
 
-        files.extend(mod_files.mods.clone().into_iter());
-
-        all_describes.push(mod_files);
+        pages.push(page);
     }
 
     let mut routes = vec![];
-    for describe in all_describes {
-        if describe.routes.is_empty() {
+    for page in pages {
+        if page.routes.is_empty() {
             continue;
         }
 
-        let base_route = describe.route.strip_prefix(&base).unwrap();
+        let base_route = page.path.strip_prefix(&base).unwrap();
         let mut base_route = base_route.to_str().unwrap().to_string();
 
         if base_route.ends_with("/") {
@@ -141,23 +184,24 @@ fn main() -> Result<()> {
             base_route = format!("/{}", base_route);
         }
 
-        /*
-        for route in describe.routes {
-            if base_route.ends_with("::") {
-                println!("cargo:warning=route={}", format!("{}{}", base_route, route));
-            } else {
-                println!("cargo:warning=route={}", format!("{}::{}", base_route, route));
-            }
-        }
-        */
-
         println!("cargo:warning=route={}", base_route);
+
+        // i am ashamed
+        if base_route.ends_with("lib.rs") {
+            base_route = base_route[..base_route.len() - "lib.rs".len()].to_string();
+        }
+        if base_route.ends_with("mod.rs") {
+            base_route = base_route[..base_route.len() - "mod.rs".len()].to_string();
+        }
+        if base_route.ends_with(".rs") {
+            base_route = base_route[..base_route.len() - ".rs".len()].to_string();
+        }
 
         let mut base_path = base_route.clone();
         base_path.replace_range(0..1, "pages::");
         let base_path = base_path.replace("/", "::");
 
-        for route in describe.routes {
+        for route in page.routes {
             routes.push(format!("        .{}_async(\"{}\", move |ctx| {{
             return {}::{}(ctx);
         }})", route, base_route, base_path, route).replace("::::", "::"));
@@ -165,10 +209,12 @@ fn main() -> Result<()> {
     }
 
 
+    /*
     let router_template = std::fs::read_to_string(ROUTE_TEMPLATE_PATH)?;
     let router_template = router_template.replace("__ROUTES__", &routes.join("\n"));
 
     std::fs::write(ROUTE_PATH, router_template)?;
+    */
 
     return Ok(());
 }
