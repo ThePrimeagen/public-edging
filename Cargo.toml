@@ -24,9 +24,10 @@ worker.workspace = true
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.1", optional = true }
 base64 = "0.21.0"
-syn = { version = "1.0.107", features = ["extra-traits"] }
+syn = { version = "1.0.107", features = ["extra-traits", "parsing"] }
 router = { path = "./router" }
 pages = { path = "./pages" }
+cargo-expand = "1.0.40"
 
 [workspace.dependencies]
 worker = "0.0.12"

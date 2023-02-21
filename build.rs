@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow};
-use syn::Visibility;
-use std::{path::{Path, PathBuf}, convert::{TryFrom, TryInto}, fmt::Display};
+use syn::{Visibility, Attribute, parse_macro_input};
+use std::{path::{Path, PathBuf, self}, convert::{TryFrom, TryInto}, fmt::Display};
 
 #[derive(Debug)]
 enum Method {
@@ -37,6 +37,23 @@ impl TryFrom<&Path> for PageDescription {
 
         for item in file.items {
             if let syn::Item::Mod(item) = &item {
+                if let Some(Attribute {
+                    path,
+                    pound_token,
+                    style,
+                    bracket_token,
+                    tokens,
+                }) = item.attrs.get(0) {
+
+                    println!("Path {:?}", path);
+                    for meta in tokens.to_owned().into_iter() {
+                        match meta {
+                        }
+                        println!("Meta? {:?}", meta);
+                    }
+
+                }
+                println!("mod {:?}", item.attrs.get(0));
                 if let Visibility::Public(_) = item.vis {
                     mods.push(item.ident.to_string());
                 }
